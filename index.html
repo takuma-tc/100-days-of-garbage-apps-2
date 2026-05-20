@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sand Lab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #eee; font-family: monospace; display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; padding: 10px; }
+  #app { display: flex; gap: 10px; align-items: flex-start; }
+  #canvas-wrap { position: relative; }
+  #canvas { display: block; cursor: crosshair; image-rendering: pixelated; }
+  #hud { position: absolute; top: 6px; right: 6px; font-size: 11px; color: #fff; text-shadow: 1px 1px 2px #000; pointer-events: none; text-align: right; }
+  #title { position: absolute; top: 6px; left: 6px; font-size: 14px; font-weight: bold; color: #fff; text-shadow: 1px 1px 3px #000; pointer-events: none; }
+  #panel { width: 160px; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+  #panel h3 { font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+  #material-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .mat-btn { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 4px; border: 2px solid transparent; cursor: pointer; font-size: 11px; font-family: monospace; background: #2a2a2a; color: #ccc; transition: background 0.1s; }
+  .mat-btn:hover { background: #3a3a3a; }
+  .mat-btn.active { border-color: #fff; background: #3a3a3a; color: #fff; }
+  .mat-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+  #brush-row { display: flex; gap: 4px; }
+  .brush-btn { flex: 1; padding: 4px; border: 2px solid #333; background: #2a2a2a; color: #ccc; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px; }
+  .brush-btn.active { border-color: #fff; color: #fff; background: #3a3a3a; }
+  #stats { font-size: 11px; color: #aaa; line-height: 1.8; }
+  #clear-btn { padding: 6px; background: #3a1a1a; border: 1px solid #662222; color: #cc4444; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 12px; }
+  #clear-btn:hover { background: #4a2a2a; }
+  #pause-btn { padding: 6px; background: #1a2a3a; border: 1px solid #224466; color: #4488cc; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 12px; }
+  #pause-btn:hover { background: #2a3a4a; }
+  .section-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+  .hint { font-size: 10px; color: #555; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div id="title">Sand Lab</div>
+    <div id="hud"><span id="fps-hud">0 fps</span></div>
+  </div>
+  <div id="panel">
+    <div>
+      <div class="section-label">Materials</div>
+      <div id="material-grid"></div>
+    </div>
+    <div>
+      <div class="section-label">Brush Size</div>
+      <div id="brush-row">
+        <button class="brush-btn active" data-size="1">1</button>
+        <button class="brush-btn" data-size="3">3</button>
+        <button class="brush-btn" data-size="5">5</button>
+      </div>
+    </div>
+    <div id="stats">
+      <div>Particles: <span id="stat-particles">0</span></div>
+      <div>FPS: <span id="stat-fps">0</span></div>
+    </div>
+    <button id="clear-btn">Clear (C)</button>
+    <button id="pause-btn">Pause (P)</button>
+    <div class="hint">
+      Keys 1-9, 0, q, w<br>
+      select materials<br>
+      Left drag: place<br>
+      Right drag: erase
+    </div>
+  </div>
+</div>
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const GRID_W = 200;
+const GRID_H = 150;
+const SCALE  = 3;
+const CANVAS_W = GRID_W * SCALE;
+const CANVAS_H = GRID_H * SCALE;
+
+const MAT = {
+  EMPTY:     0,
+  SAND:      1,
+  WATER:     2,
+  WALL:      3,
+  FIRE:      4,
+  SMOKE:     5,
+  OIL:       6,
+  LAVA:      7,
+  ACID:      8,
+  STEAM:     9,
+  ICE:       10,
+  PLANT:     11,
+  GUNPOWDER: 12,
+};
+
+const MATERIAL_LIST = [
+  { id: MAT.SAND,      name: 'Sand',      key: '1', color: '#C2A052' },
+  { id: MAT.WATER,     name: 'Water',     key: '2', color: '#3A7FC1' },
+  { id: MAT.WALL,      name: 'Wall',      key: '3', color: '#888888' },
+  { id: MAT.FIRE,      name: 'Fire',      key: '4', color: '#FF4500' },
+  { id: MAT.SMOKE,     name: 'Smoke',     key: '5', color: '#888888' },
+  { id: MAT.OIL,       name: 'Oil',       key: '6', color: '#5C3A00' },
+  { id: MAT.LAVA,      name: 'Lava',      key: '7', color: '#CF4520' },
+  { id: MAT.ACID,      name: 'Acid',      key: '8', color: '#7FFF00' },
+  { id: MAT.STEAM,     name: 'Steam',     key: '9', color: '#BBDDFF' },
+  { id: MAT.ICE,       name: 'Ice',       key: '0', color: '#A8D8EA' },
+  { id: MAT.PLANT,     name: 'Plant',     key: 'q', color: '#228B22' },
+  { id: MAT.GUNPOWDER, name: 'Gunpowder', key: 'w', color: '#333333' },
+];
+
+const BASE_COLORS = {
+  [MAT.EMPTY]:     0x00000000,
+  [MAT.SAND]:      0xFFC2A052,
+  [MAT.WATER]:     0xFF3A7FC1,
+  [MAT.WALL]:      0xFF888888,
+  [MAT.FIRE]:      0xFFFF4500,
+  [MAT.SMOKE]:     0xFF888888,
+  [MAT.OIL]:       0xFF5C3A00,
+  [MAT.LAVA]:      0xFFCF4520,
+  [MAT.ACID]:      0xFF7FFF00,
+  [MAT.STEAM]:     0xFFBBDDFF,
+  [MAT.ICE]:       0xFFA8D8EA,
+  [MAT.PLANT]:     0xFF228B22,
+  [MAT.GUNPOWDER]: 0xFF333333,
+};
+
+// ── Grid buffers ───────────────────────────────────────────────────────────
+const SIZE = GRID_W * GRID_H;
+const grid       = new Uint8Array(SIZE);   // material ID
+const dirty      = new Uint8Array(SIZE);   // processed this frame?
+const lifetime   = new Uint16Array(SIZE);  // ticks remaining
+const colorVar   = new Uint8Array(SIZE);   // ±15 brightness offset, stored as 0-30
+const velX       = new Float32Array(SIZE); // explosion velocity
+const velY       = new Float32Array(SIZE);
+const velLife    = new Uint8Array(SIZE);   // velocity ticks remaining
+
+// ── Game state ────────────────────────────────────────────────────────────
+const state = {
+  selectedMat:  MAT.SAND,
+  brushSize:    1,
+  paused:       false,
+  mouseDown:    false,
+  mouseRight:   false,
+  mouseX:       0,
+  mouseY:       0,
+  frameCount:   0,
+  lastFpsTime:  0,
+  fps:          0,
+  fpsFrames:    0,
+  leftRight:    0,  // alternating each frame
+};
+
+// ── Canvas setup ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+canvas.width  = CANVAS_W;
+canvas.height = CANVAS_H;
+const ctx = canvas.getContext('2d');
+const offscreen = new OffscreenCanvas(CANVAS_W, CANVAS_H);
+const octx = offscreen.getContext('2d');
+const imageData = octx.createImageData(CANVAS_W, CANVAS_H);
+const pixels = new Uint32Array(imageData.data.buffer);
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+const idx   = (x, y) => y * GRID_W + x;
+const inBounds = (x, y) => x >= 0 && x < GRID_W && y >= 0 && y < GRID_H;
+
+function rng() { return Math.random(); }
+function rngBool() { return rng() < 0.5; }
+
+function spawnParticle(x, y, mat) {
+  if (!inBounds(x, y)) return;
+  const i = idx(x, y);
+  grid[i] = mat;
+  colorVar[i] = Math.floor(rng() * 31); // 0-30 → offset = val - 15
+  // assign lifetime
+  if (mat === MAT.FIRE)      lifetime[i] = 60 + Math.floor(rng() * 60);
+  else if (mat === MAT.SMOKE)lifetime[i] = 80 + Math.floor(rng() * 70);
+  else if (mat === MAT.STEAM)lifetime[i] = 200;
+  else                       lifetime[i] = 0;
+}
+
+function clearCell(x, y) {
+  if (!inBounds(x, y)) return;
+  const i = idx(x, y);
+  grid[i] = MAT.EMPTY;
+  lifetime[i] = 0;
+  velX[i] = 0; velY[i] = 0; velLife[i] = 0;
+}
+
+function swap(i, j) {
+  const gTmp = grid[i];      grid[i] = grid[j];      grid[j] = gTmp;
+  const lTmp = lifetime[i];  lifetime[i] = lifetime[j]; lifetime[j] = lTmp;
+  const cTmp = colorVar[i];  colorVar[i] = colorVar[j]; colorVar[j] = cTmp;
+}
+
+function moveParticle(fx, fy, tx, ty) {
+  const fi = idx(fx, fy), ti = idx(tx, ty);
+  swap(fi, ti);
+  dirty[ti] = 1;
+}
+
+// ── Initialization ────────────────────────────────────────────────────────
+function initGrid() {
+  grid.fill(0);
+  lifetime.fill(0);
+  colorVar.fill(15);
+  velX.fill(0); velY.fill(0); velLife.fill(0);
+
+  // sine-wave terrain in bottom 20%
+  const terrainTop = Math.floor(GRID_H * 0.80);
+  for (let x = 0; x < GRID_W; x++) {
+    const h = terrainTop + Math.floor(
+      Math.sin(x * 0.08) * 4 +
+      Math.sin(x * 0.03) * 6 +
+      Math.sin(x * 0.15) * 2
+    );
+    for (let y = h; y < GRID_H; y++) {
+      spawnParticle(x, y, MAT.WALL);
+    }
+  }
+}
+
+// ── Physics ───────────────────────────────────────────────────────────────
+function isSolid(mat) {
+  return mat === MAT.WALL || mat === MAT.ICE || mat === MAT.PLANT;
+}
+
+function isLiquid(mat) {
+  return mat === MAT.WATER || mat === MAT.OIL || mat === MAT.ACID || mat === MAT.LAVA;
+}
+
+function isGas(mat) {
+  return mat === MAT.FIRE || mat === MAT.SMOKE || mat === MAT.STEAM;
+}
+
+function canDisplace(mover, target) {
+  if (target === MAT.EMPTY) return true;
+  // sand displaces liquids
+  if ((mover === MAT.SAND || mover === MAT.GUNPOWDER) && isLiquid(target)) return true;
+  // lava displaces water/oil/acid
+  if (mover === MAT.LAVA && (target === MAT.WATER || target === MAT.OIL || target === MAT.ACID)) return true;
+  // oil floats on water
+  if (mover === MAT.OIL && target === MAT.WATER) return true;
+  return false;
+}
+
+function updateSand(x, y) {
+  const i = idx(x, y);
+  // apply velocity
+  if (velLife[i] > 0) {
+    velLife[i]--;
+    const nx = Math.round(x + velX[i]);
+    const ny = Math.round(y + velY[i]);
+    if (inBounds(nx, ny) && grid[idx(nx, ny)] === MAT.EMPTY) {
+      moveParticle(x, y, nx, ny); return;
+    }
+    velX[i] *= 0.5; velY[i] *= 0.5;
+  }
+  if (y + 1 < GRID_H && canDisplace(MAT.SAND, grid[idx(x, y + 1)])) {
+    moveParticle(x, y, x, y + 1); return;
+  }
+  const dl = state.leftRight === 0;
+  const d1x = dl ? x - 1 : x + 1;
+  const d2x = dl ? x + 1 : x - 1;
+  if (y + 1 < GRID_H) {
+    if (inBounds(d1x, y + 1) && canDisplace(MAT.SAND, grid[idx(d1x, y + 1)])) {
+      moveParticle(x, y, d1x, y + 1); return;
+    }
+    if (inBounds(d2x, y + 1) && canDisplace(MAT.SAND, grid[idx(d2x, y + 1)])) {
+      moveParticle(x, y, d2x, y + 1); return;
+    }
+  }
+}
+
+function updateWater(x, y) {
+  const i = idx(x, y);
+  if (y + 1 < GRID_H && canDisplace(MAT.WATER, grid[idx(x, y + 1)])) {
+    moveParticle(x, y, x, y + 1); return;
+  }
+  const dl = state.leftRight === 0;
+  // flow sideways up to 3
+  for (let d = 1; d <= 3; d++) {
+    const lx = dl ? x - d : x + d;
+    const rx = dl ? x + d : x - d;
+    if (inBounds(lx, y) && grid[idx(lx, y)] === MAT.EMPTY) {
+      moveParticle(x, y, lx, y); return;
+    }
+    if (inBounds(rx, y) && grid[idx(rx, y)] === MAT.EMPTY) {
+      moveParticle(x, y, rx, y); return;
+    }
+  }
+}
+
+function updateOil(x, y) {
+  const i = idx(x, y);
+  // oil falls, but floats on water
+  if (y + 1 < GRID_H) {
+    const below = grid[idx(x, y + 1)];
+    if (below === MAT.EMPTY) { moveParticle(x, y, x, y + 1); return; }
+    if (below === MAT.WATER) { moveParticle(x, y, x, y + 1); return; }
+  }
+  const dl = state.leftRight === 0;
+  for (let d = 1; d <= 3; d++) {
+    const lx = dl ? x - d : x + d;
+    const rx = dl ? x + d : x - d;
+    if (inBounds(lx, y) && grid[idx(lx, y)] === MAT.EMPTY) { moveParticle(x, y, lx, y); return; }
+    if (inBounds(rx, y) && grid[idx(rx, y)] === MAT.EMPTY) { moveParticle(x, y, rx, y); return; }
+  }
+}
+
+function updateAcid(x, y) {
+  // Erode neighbors
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const ni = idx(nx, ny);
+    const m = grid[ni];
+    if ((m === MAT.SAND || m === MAT.WALL || m === MAT.ICE || m === MAT.PLANT) && rng() < 0.1) {
+      // acid also disappears sometimes
+      clearCell(nx, ny);
+      if (rng() < 0.3) clearCell(x, y);
+      return;
+    }
+  }
+  // fall like water
+  if (y + 1 < GRID_H && canDisplace(MAT.ACID, grid[idx(x, y + 1)])) {
+    moveParticle(x, y, x, y + 1); return;
+  }
+  const dl = state.leftRight === 0;
+  for (let d = 1; d <= 3; d++) {
+    const lx = dl ? x - d : x + d;
+    const rx = dl ? x + d : x - d;
+    if (inBounds(lx, y) && grid[idx(lx, y)] === MAT.EMPTY) { moveParticle(x, y, lx, y); return; }
+    if (inBounds(rx, y) && grid[idx(rx, y)] === MAT.EMPTY) { moveParticle(x, y, rx, y); return; }
+  }
+}
+
+function ignitesFrom(mat) {
+  return mat === MAT.OIL || mat === MAT.GUNPOWDER || mat === MAT.PLANT;
+}
+
+function explode(cx, cy) {
+  const R = 4;
+  for (let dy = -R; dy <= R; dy++) {
+    for (let dx = -R; dx <= R; dx++) {
+      if (dx*dx + dy*dy > R*R) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (!inBounds(nx, ny)) continue;
+      const ni = idx(nx, ny);
+      const m = grid[ni];
+      if (m !== MAT.WALL) {
+        spawnParticle(nx, ny, MAT.FIRE);
+        dirty[ni] = 1;
+      }
+      // impulse to sand/water
+      if (m === MAT.SAND || m === MAT.WATER) {
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        velX[ni] = (dx / dist) * 3;
+        velY[ni] = (dy / dist) * 3;
+        velLife[ni] = 10;
+      }
+    }
+  }
+}
+
+function updateFire(x, y) {
+  const i = idx(x, y);
+  lifetime[i]--;
+  if (lifetime[i] <= 0) {
+    spawnParticle(x, y, MAT.SMOKE);
+    dirty[i] = 1;
+    return;
+  }
+  // spread to flammables
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const ni = idx(nx, ny);
+    const m = grid[ni];
+    if (ignitesFrom(m) && rng() < 0.05) {
+      if (m === MAT.GUNPOWDER) {
+        explode(nx, ny);
+      } else {
+        spawnParticle(nx, ny, MAT.FIRE);
+        dirty[ni] = 1;
+      }
+    }
+    // melt ice
+    if (m === MAT.ICE && rng() < 0.05) {
+      spawnParticle(nx, ny, MAT.WATER);
+      dirty[ni] = 1;
+    }
+    // evaporate water
+    if (m === MAT.WATER && rng() < 0.02) {
+      spawnParticle(nx, ny, MAT.STEAM);
+      dirty[ni] = 1;
+    }
+  }
+  // flicker color via lifetime
+  colorVar[i] = Math.floor(rng() * 31);
+  // rise with random drift
+  const dy = -1;
+  const dx = rngBool() ? (rngBool() ? -1 : 0) : (rngBool() ? 1 : 0);
+  const ny = y + dy, nx2 = x + dx;
+  if (inBounds(nx2, ny) && grid[idx(nx2, ny)] === MAT.EMPTY) {
+    moveParticle(x, y, nx2, ny); return;
+  }
+  if (inBounds(x, ny) && grid[idx(x, ny)] === MAT.EMPTY) {
+    moveParticle(x, y, x, ny); return;
+  }
+}
+
+function updateSmoke(x, y) {
+  const i = idx(x, y);
+  lifetime[i]--;
+  if (lifetime[i] <= 0) {
+    clearCell(x, y); return;
+  }
+  const dx = rngBool() ? (rngBool() ? -1 : 0) : (rngBool() ? 1 : 0);
+  const ny = y - 1;
+  const nx2 = x + dx;
+  if (inBounds(nx2, ny) && grid[idx(nx2, ny)] === MAT.EMPTY) {
+    moveParticle(x, y, nx2, ny); return;
+  }
+  if (inBounds(x, ny) && grid[idx(x, ny)] === MAT.EMPTY) {
+    moveParticle(x, y, x, ny); return;
+  }
+  // drift sideways
+  if (rngBool() && inBounds(x + 1, y) && grid[idx(x + 1, y)] === MAT.EMPTY) { moveParticle(x, y, x + 1, y); return; }
+  if (inBounds(x - 1, y) && grid[idx(x - 1, y)] === MAT.EMPTY) { moveParticle(x, y, x - 1, y); return; }
+}
+
+function updateLava(x, y) {
+  const i = idx(x, y);
+  // solidify when touching water/ice
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const m = grid[idx(nx, ny)];
+    if ((m === MAT.WATER || m === MAT.ICE) && rng() < 0.05) {
+      spawnParticle(x, y, MAT.WALL);
+      dirty[i] = 1;
+      return;
+    }
+    // ignite flammables
+    if (ignitesFrom(m) && rng() < 0.05) {
+      if (m === MAT.GUNPOWDER) explode(nx, ny);
+      else { spawnParticle(nx, ny, MAT.FIRE); dirty[idx(nx, ny)] = 1; }
+    }
+  }
+  // fall like sand
+  if (y + 1 < GRID_H && canDisplace(MAT.LAVA, grid[idx(x, y + 1)])) {
+    moveParticle(x, y, x, y + 1); return;
+  }
+  const dl = state.leftRight === 0;
+  for (let d = 1; d <= 2; d++) {
+    const lx = dl ? x - d : x + d;
+    const rx = dl ? x + d : x - d;
+    if (inBounds(lx, y) && canDisplace(MAT.LAVA, grid[idx(lx, y)])) { moveParticle(x, y, lx, y); return; }
+    if (inBounds(rx, y) && canDisplace(MAT.LAVA, grid[idx(rx, y)])) { moveParticle(x, y, rx, y); return; }
+  }
+}
+
+function updateSteam(x, y) {
+  const i = idx(x, y);
+  lifetime[i]--;
+  if (lifetime[i] <= 0) {
+    spawnParticle(x, y, MAT.WATER);
+    dirty[i] = 1; return;
+  }
+  const dx = rngBool() ? (rngBool() ? -1 : 0) : (rngBool() ? 1 : 0);
+  const ny = y - 1;
+  const nx2 = x + dx;
+  if (inBounds(nx2, ny) && grid[idx(nx2, ny)] === MAT.EMPTY) { moveParticle(x, y, nx2, ny); return; }
+  if (inBounds(x, ny) && grid[idx(x, ny)] === MAT.EMPTY) { moveParticle(x, y, x, ny); return; }
+  if (rngBool() && inBounds(x + 1, y) && grid[idx(x + 1, y)] === MAT.EMPTY) { moveParticle(x, y, x + 1, y); return; }
+  if (inBounds(x - 1, y) && grid[idx(x - 1, y)] === MAT.EMPTY) { moveParticle(x, y, x - 1, y); return; }
+}
+
+function updateIce(x, y) {
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const ni = idx(nx, ny);
+    const m = grid[ni];
+    if (m === MAT.WATER && rng() < 0.05) {
+      spawnParticle(nx, ny, MAT.ICE);
+      dirty[ni] = 1;
+    }
+    if ((m === MAT.FIRE || m === MAT.LAVA) && rng() < 0.05) {
+      spawnParticle(x, y, MAT.WATER);
+      dirty[idx(x, y)] = 1;
+      return;
+    }
+  }
+}
+
+function updatePlant(x, y) {
+  if (rng() < 0.001) {
+    const dirs = [[0,1],[1,0],[-1,0],[0,-1]];
+    const [dx, dy] = dirs[Math.floor(rng() * 4)];
+    const nx = x + dx, ny = y + dy;
+    if (inBounds(nx, ny) && grid[idx(nx, ny)] === MAT.EMPTY) {
+      spawnParticle(nx, ny, MAT.PLANT);
+      dirty[idx(nx, ny)] = 1;
+    }
+  }
+  // check for fire
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const m = grid[idx(nx, ny)];
+    if ((m === MAT.FIRE || m === MAT.LAVA) && rng() < 0.05) {
+      spawnParticle(x, y, MAT.FIRE);
+      dirty[idx(x, y)] = 1;
+      return;
+    }
+  }
+}
+
+function updateGunpowder(x, y) {
+  const i = idx(x, y);
+  // check if touching fire
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const m = grid[idx(nx, ny)];
+    if (m === MAT.FIRE || m === MAT.LAVA) {
+      explode(x, y);
+      clearCell(x, y);
+      return;
+    }
+  }
+  // fall like sand
+  if (y + 1 < GRID_H && canDisplace(MAT.GUNPOWDER, grid[idx(x, y + 1)])) {
+    moveParticle(x, y, x, y + 1); return;
+  }
+  const dl = state.leftRight === 0;
+  const d1x = dl ? x - 1 : x + 1;
+  const d2x = dl ? x + 1 : x - 1;
+  if (y + 1 < GRID_H) {
+    if (inBounds(d1x, y + 1) && canDisplace(MAT.GUNPOWDER, grid[idx(d1x, y + 1)])) { moveParticle(x, y, d1x, y + 1); return; }
+    if (inBounds(d2x, y + 1) && canDisplace(MAT.GUNPOWDER, grid[idx(d2x, y + 1)])) { moveParticle(x, y, d2x, y + 1); return; }
+  }
+}
+
+function updateWaterSpecial(x, y) {
+  // water evaporates near fire (handled in fire update)
+  // water freezes near ice
+  const neighbors = [[0,1],[1,0],[-1,0],[0,-1]];
+  for (const [dx, dy] of neighbors) {
+    const nx = x + dx, ny = y + dy;
+    if (!inBounds(nx, ny)) continue;
+    const m = grid[idx(nx, ny)];
+    if (m === MAT.ICE && rng() < 0.03) {
+      spawnParticle(x, y, MAT.ICE);
+      dirty[idx(x, y)] = 1;
+      return;
+    }
+  }
+  updateWater(x, y);
+}
+
+// ── Grid update ───────────────────────────────────────────────────────────
+function updateGrid() {
+  dirty.fill(0);
+  state.leftRight = state.frameCount % 2;
+
+  for (let y = GRID_H - 1; y >= 0; y--) {
+    // alternate x direction each frame
+    const startX = state.leftRight === 0 ? 0 : GRID_W - 1;
+    const endX   = state.leftRight === 0 ? GRID_W : -1;
+    const stepX  = state.leftRight === 0 ? 1 : -1;
+
+    for (let x = startX; x !== endX; x += stepX) {
+      const i = idx(x, y);
+      if (dirty[i]) continue;
+      const mat = grid[i];
+      if (mat === MAT.EMPTY || mat === MAT.WALL) continue;
+
+      switch (mat) {
+        case MAT.SAND:      updateSand(x, y);         break;
+        case MAT.WATER:     updateWaterSpecial(x, y);  break;
+        case MAT.OIL:       updateOil(x, y);           break;
+        case MAT.ACID:      updateAcid(x, y);          break;
+        case MAT.FIRE:      updateFire(x, y);          break;
+        case MAT.SMOKE:     updateSmoke(x, y);         break;
+        case MAT.LAVA:      updateLava(x, y);          break;
+        case MAT.STEAM:     updateSteam(x, y);         break;
+        case MAT.ICE:       updateIce(x, y);           break;
+        case MAT.PLANT:     updatePlant(x, y);         break;
+        case MAT.GUNPOWDER: updateGunpowder(x, y);     break;
+      }
+    }
+  }
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────
+function hexToRGBA(hex) {
+  // hex is 0xAARRGGBB but we want 0xAABBGGRR for Uint32Array on little-endian
+  const a = (hex >>> 24) & 0xFF;
+  const r = (hex >>> 16) & 0xFF;
+  const g = (hex >>>  8) & 0xFF;
+  const b =  hex         & 0xFF;
+  return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+// Precompute RGBA values for each material
+const MAT_COLORS_RGBA = new Array(13);
+for (let m = 0; m <= 12; m++) {
+  const hex = BASE_COLORS[m] || 0x00000000;
+  MAT_COLORS_RGBA[m] = hexToRGBA(hex);
+}
+
+function applyBrightness(rgba, offset) {
+  // offset is 0-30, actual brightness offset = offset - 15
+  const delta = offset - 15;
+  const r = Math.max(0, Math.min(255, ((rgba      ) & 0xFF) + delta));
+  const g = Math.max(0, Math.min(255, ((rgba >> 8 ) & 0xFF) + delta));
+  const b = Math.max(0, Math.min(255, ((rgba >> 16) & 0xFF) + delta));
+  const a = (rgba >> 24) & 0xFF;
+  return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+function renderFrame() {
+  for (let y = 0; y < GRID_H; y++) {
+    for (let x = 0; x < GRID_W; x++) {
+      const i   = idx(x, y);
+      const mat = grid[i];
+      let color = 0xFF000000; // black background
+      if (mat !== MAT.EMPTY) {
+        color = applyBrightness(MAT_COLORS_RGBA[mat], colorVar[i]);
+        // smoke/steam alpha fade
+        if (mat === MAT.SMOKE) {
+          const life = lifetime[i];
+          const maxLife = 150;
+          const alpha = Math.floor((life / maxLife) * 200);
+          color = (color & 0x00FFFFFF) | (alpha << 24);
+          // blend with black
+          const a = alpha / 255;
+          const r = Math.floor(((color      ) & 0xFF) * a);
+          const g = Math.floor(((color >>  8) & 0xFF) * a);
+          const b = Math.floor(((color >> 16) & 0xFF) * a);
+          color = (0xFF << 24) | (b << 16) | (g << 8) | r;
+        }
+      }
+      // fill 3x3 block
+      const px = x * SCALE;
+      const py = y * SCALE;
+      for (let dy = 0; dy < SCALE; dy++) {
+        const row = (py + dy) * CANVAS_W + px;
+        pixels[row    ] = color;
+        pixels[row + 1] = color;
+        pixels[row + 2] = color;
+      }
+    }
+  }
+  octx.putImageData(imageData, 0, 0);
+  ctx.drawImage(offscreen, 0, 0);
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────
+function canvasToGrid(cx, cy) {
+  return {
+    x: Math.floor(cx / SCALE),
+    y: Math.floor(cy / SCALE),
+  };
+}
+
+function paintAt(cx, cy, mat) {
+  const { x, y } = canvasToGrid(cx, cy);
+  const r = state.brushSize;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy > r*r) continue;
+      const nx = x + dx, ny = y + dy;
+      if (!inBounds(nx, ny)) continue;
+      if (mat === MAT.EMPTY) clearCell(nx, ny);
+      else spawnParticle(nx, ny, mat);
+    }
+  }
+}
+
+function handleInput() {
+  if (!state.mouseDown && !state.mouseRight) return;
+  if (state.mouseRight) {
+    paintAt(state.mouseX, state.mouseY, MAT.EMPTY);
+  } else {
+    paintAt(state.mouseX, state.mouseY, state.selectedMat);
+  }
+}
+
+function getCanvasPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (CANVAS_W / rect.width),
+    y: (e.clientY - rect.top)  * (CANVAS_H / rect.height),
+  };
+}
+
+canvas.addEventListener('mousedown', e => {
+  e.preventDefault();
+  const pos = getCanvasPos(e);
+  state.mouseX = pos.x; state.mouseY = pos.y;
+  if (e.button === 2) state.mouseRight = true;
+  else state.mouseDown = true;
+});
+canvas.addEventListener('mousemove', e => {
+  const pos = getCanvasPos(e);
+  state.mouseX = pos.x; state.mouseY = pos.y;
+});
+canvas.addEventListener('mouseup', e => {
+  if (e.button === 2) state.mouseRight = false;
+  else state.mouseDown = false;
+});
+canvas.addEventListener('mouseleave', () => {
+  state.mouseDown = false; state.mouseRight = false;
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const pos = getCanvasPos(t);
+  state.mouseX = pos.x; state.mouseY = pos.y;
+  state.mouseDown = true;
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const pos = getCanvasPos(t);
+  state.mouseX = pos.x; state.mouseY = pos.y;
+}, { passive: false });
+canvas.addEventListener('touchend', () => { state.mouseDown = false; });
+
+document.addEventListener('keydown', e => {
+  const keyMap = {
+    '1': MAT.SAND, '2': MAT.WATER, '3': MAT.WALL, '4': MAT.FIRE,
+    '5': MAT.SMOKE, '6': MAT.OIL, '7': MAT.LAVA, '8': MAT.ACID,
+    '9': MAT.STEAM, '0': MAT.ICE, 'q': MAT.PLANT, 'w': MAT.GUNPOWDER,
+  };
+  const key = e.key.toLowerCase();
+  if (keyMap[key] !== undefined) {
+    state.selectedMat = keyMap[key];
+    updateMatUI();
+  }
+  if (key === 'c') clearCanvas();
+  if (key === 'p') togglePause();
+});
+
+// ── UI ─────────────────────────────────────────────────────────────────────
+function buildUI() {
+  const grid2 = document.getElementById('material-grid');
+  MATERIAL_LIST.forEach(m => {
+    const btn = document.createElement('button');
+    btn.className = 'mat-btn';
+    btn.dataset.matId = m.id;
+    const swatch = document.createElement('div');
+    swatch.className = 'mat-swatch';
+    swatch.style.background = m.color;
+    btn.appendChild(swatch);
+    btn.appendChild(document.createTextNode(m.name));
+    btn.title = `Key: ${m.key}`;
+    btn.addEventListener('click', () => {
+      state.selectedMat = m.id;
+      updateMatUI();
+    });
+    grid2.appendChild(btn);
+  });
+
+  document.querySelectorAll('.brush-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.brushSize = parseInt(btn.dataset.size);
+      document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  document.getElementById('clear-btn').addEventListener('click', clearCanvas);
+  document.getElementById('pause-btn').addEventListener('click', togglePause);
+
+  updateMatUI();
+}
+
+function updateMatUI() {
+  document.querySelectorAll('.mat-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.matId) === state.selectedMat);
+  });
+}
+
+function clearCanvas() {
+  grid.fill(0);
+  lifetime.fill(0);
+  velX.fill(0); velY.fill(0); velLife.fill(0);
+}
+
+function togglePause() {
+  state.paused = !state.paused;
+  document.getElementById('pause-btn').textContent = state.paused ? 'Resume (P)' : 'Pause (P)';
+}
+
+function countParticles() {
+  let count = 0;
+  for (let i = 0; i < SIZE; i++) if (grid[i] !== MAT.EMPTY) count++;
+  return count;
+}
+
+// ── Game loop ─────────────────────────────────────────────────────────────
+let lastTime = 0;
+function loop(ts) {
+  requestAnimationFrame(loop);
+
+  const dt = ts - lastTime;
+  lastTime = ts;
+
+  // FPS tracking
+  state.fpsFrames++;
+  if (ts - state.lastFpsTime >= 1000) {
+    state.fps = state.fpsFrames;
+    state.fpsFrames = 0;
+    state.lastFpsTime = ts;
+    document.getElementById('fps-hud').textContent = state.fps + ' fps';
+    document.getElementById('stat-fps').textContent = state.fps;
+    document.getElementById('stat-particles').textContent = countParticles().toLocaleString();
+  }
+
+  handleInput();
+
+  if (!state.paused) {
+    updateGrid();
+    state.frameCount++;
+  }
+
+  renderFrame();
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+buildUI();
+initGrid();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
