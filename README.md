@@ -1,6 +1,4 @@
-# 100-days-of-garbage-apps-2
-
-## Day 2 — Sand Lab
+## 2 — Sand Lab
 
 
 <img width="842" height="503" alt="Screenshot 2026-05-20 at 22 57 31" src="https://github.com/user-attachments/assets/7366f145-b45d-4556-987e-a113f262a216" />
